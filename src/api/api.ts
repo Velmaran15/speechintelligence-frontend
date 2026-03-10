@@ -1,7 +1,7 @@
 import axios from "axios";
 
 const API = axios.create({
-  baseURL: "http://localhost:5412/v1/",
+  baseURL: "https://my-app-150979881460.asia-south1.run.app/v1/",
 });
 
 // ─── Types ────────────────────────────────────────────────────────────────
@@ -48,7 +48,7 @@ export const retryJob = (jobId: string) =>
 // ─── Documents ───────────────────────────────────────────────────────────────
 /** Trigger a browser download for the given format (txt | docx | pdf) */
 export const downloadJobFile = (jobId: string, format: "txt" | "docx" | "pdf") => {
-  const url = `http://localhost:5412/v1/documents/${jobId}/download/${format}`;
+  const url = `https://my-app-150979881460.asia-south1.run.app/v1/documents/${jobId}/download/${format}`;
   const a = document.createElement("a");
   a.href = url;
   a.download = `Transcript_${jobId}.${format}`;
