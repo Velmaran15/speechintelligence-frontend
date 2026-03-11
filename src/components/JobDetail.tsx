@@ -27,11 +27,14 @@ interface JobData {
     filename?: string
     error?: string
     includeTimestamps?: boolean
+    targetLanguage?: string
     metadata?: {
         diarizationScore?: number
         language?: string
         duration?: number
     }
+    createdAt: string
+    updatedAt: string
 }
 
 interface JobDetailProps {
@@ -186,7 +189,7 @@ export default function JobDetail({ jobId, onBack }: JobDetailProps) {
         if (!segs) return
         setSummaryLoading(true)
         try {
-            const res = await getSummary(flattenSegments(segs))
+            const res = await getSummary(flattenSegments(segs), job?.targetLanguage ?? undefined)
             setSummaryData(res.data.summary ?? [])
         } catch {
             toast.error("Failed to generate summary")

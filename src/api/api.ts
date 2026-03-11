@@ -63,5 +63,5 @@ export const getKeywords = (transcript: string) =>
   API.post<KeywordResponse>("/ai/keywords", { transcript });
 
 /** POST /ai/summary – generate 5-bullet summary from transcript text */
-export const getSummary = (transcript: string) =>
-  API.post<SummaryResponse>("/ai/summary", { transcript });
+export const getSummary = (transcript: string, targetLanguage?: string) =>
+  API.post<SummaryResponse>("/ai/summary", { transcript, targetLanguage });
