@@ -25,6 +25,7 @@ export default function UploadCard() {
       targetLanguage: string
       transliteration: boolean
       translation: boolean
+      provider: string
     }
   ) => {
     try {
@@ -39,6 +40,7 @@ export default function UploadCard() {
       formData.append("targetLanguage", options.targetLanguage === "none" ? "" : options.targetLanguage)
       formData.append("transliteration", String(options.transliteration))
       formData.append("translation", String(options.translation))
+      formData.append("provider", options.provider)
 
       const res = await submitBatch(formData)
 
@@ -49,8 +51,8 @@ export default function UploadCard() {
       setBatchId(id)
       setView("jobs")
       toast.success(`Batch submitted! ${files.length} file${files.length > 1 ? "s" : ""} queued.`)
-    } catch (err) {
-      toast.error("Batch submission failed. Please try again.")
+    } catch (err: any) {
+      toast.error(`Batch submission failed: ${err.message || 'Unknown error'}. Please check console.`)
       console.error("[UploadCard] submitBatch error", err)
     } finally {
       setSubmitting(false)

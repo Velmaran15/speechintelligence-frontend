@@ -1,7 +1,7 @@
 import axios from "axios";
 
 const API = axios.create({
-  baseURL: "https://my-app-150979881460.asia-south1.run.app/v1/",
+  baseURL: "http://localhost:8080/v1/",
 });
 
 // ─── Types ────────────────────────────────────────────────────────────────
@@ -47,14 +47,37 @@ export const retryJob = (jobId: string) =>
 
 // ─── Documents ───────────────────────────────────────────────────────────────
 /** Trigger a browser download for the given format (txt | docx | pdf) */
-export const downloadJobFile = (jobId: string, format: "txt" | "docx" | "pdf") => {
-  const url = `https://my-app-150979881460.asia-south1.run.app/v1/documents/${jobId}/download/${format}`;
+export const downloadJobFile = (jobId: string, format: "txt" | "docx" | "pdf", useEdited = false) => {
+  const typeQuery = useEdited ? "?type=edited" : "";
+  const url = `http://localhost:8080/v1/documents/${jobId}/download/${format}${typeQuery}`;
   const a = document.createElement("a");
   a.href = url;
-  a.download = `Transcript_${jobId}.${format}`;
+  a.download = `Transcript_${jobId}${useEdited ? '_Edited' : ''}.${format}`;
   document.body.appendChild(a);
   a.click();
   a.remove();
+};
+
+// ─── Transcript Edit ─────────────────────────────────────────────────────────
+/** PATCH /jobs/:id/transcript – persist a user-edited transcript */
+export const saveEditedTranscript = (jobId: string, text: string) =>
+  API.patch(`/jobs/${jobId}/transcript`, { editedTranscript: text });
+
+/** Download original or edited transcript as a .txt file (client-side blob) */
+export const downloadTranscriptAsText = (
+  jobId: string,
+  type: "original" | "edited",
+  text: string
+) => {
+  const blob = new Blob([text], { type: "text/plain;charset=utf-8" });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = `Transcript_${jobId}_${type}.txt`;
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  URL.revokeObjectURL(url);
 };
 
 // ─── AI ──────────────────────────────────────────────────────────────────────

@@ -1,11 +1,19 @@
 import { useCallback, useEffect, useRef, useState } from "react"
-import { getJobStatus, retryJob, downloadJobFile, getKeywords, getSummary } from "@/api/api"
+import { getJobStatus, retryJob, downloadJobFile, getKeywords, getSummary, saveEditedTranscript, downloadTranscriptAsText } from "@/api/api"
 import { Button } from "@/components/ui/button"
 import { Badge } from "@/components/ui/badge"
 import { Switch } from "@/components/ui/switch"
 import { Label } from "@/components/ui/label"
 import { Progress } from "@/components/ui/progress"
-import { Loader2, ArrowLeft, RotateCcw, FileText, FileType, BookOpen, Sparkles, Tag } from "lucide-react"
+import {
+    DropdownMenu,
+    DropdownMenuContent,
+    DropdownMenuItem,
+    DropdownMenuLabel,
+    DropdownMenuSeparator,
+    DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu"
+import { Loader2, ArrowLeft, RotateCcw, FileText, FileType, BookOpen, Sparkles, Tag, Pencil, X, Check, ChevronDown, Download } from "lucide-react"
 import { toast } from "sonner"
 import KeywordHighlighter from "@/components/KeywordHighlighter"
 import SummaryPanel from "@/components/SummaryPanel"
@@ -68,9 +76,28 @@ function parseTranscript(raw: string | DiarizedSegment[] | undefined): DiarizedS
     return null
 }
 
-/** Flatten segments into plain text for AI calls */
+/** Flatten segments into plain text for AI calls or editing */
 function flattenSegments(segs: DiarizedSegment[]): string {
     return segs.map((s) => `${s.speaker}: ${s.text}`).join("\n")
+}
+
+/** Normalise keywords – backend may return string[] or a single comma-joined string */
+function normaliseKeywords(raw: unknown): string[] {
+    if (Array.isArray(raw)) {
+        // It might still be ["kw1,kw2,kw3"] — flatten if so
+        return raw.flatMap((item) =>
+            typeof item === "string" ? item.split(",").map((s) => s.trim()).filter(Boolean) : []
+        )
+    }
+    if (typeof raw === "string") return raw.split(",").map((s) => s.trim()).filter(Boolean)
+    return []
+}
+
+/** Normalise summary – backend may return string[] or a single comma/newline-joined string */
+function normaliseSummary(raw: unknown): string[] {
+    if (Array.isArray(raw)) return raw as string[]
+    if (typeof raw === "string") return raw.split("\n").map((s) => s.trim()).filter(Boolean)
+    return []
 }
 
 /** Consistent colour per speaker label */
@@ -98,7 +125,7 @@ function formatTime(s?: number) {
     if (s === undefined) return ""
     const m = Math.floor(s / 60)
     const sec = Math.floor(s % 60)
-    return `${String(m).padStart(2, "0")}:${String(sec).padStart(2, "0")}`
+    return `${String(m).padStart(2, "00")}:${String(sec).padStart(2, "00")}`
 }
 
 const POLL_INTERVAL_MS = 4000
@@ -116,6 +143,12 @@ export default function JobDetail({ jobId, onBack }: JobDetailProps) {
     const [summaryData, setSummaryData] = useState<string[] | null>(null)
     const [keywordTypeFilter, setKeywordTypeFilter] = useState<string | null>(null)
     const keywordRefsMap = useRef<Map<string, HTMLSpanElement>>(new Map())
+
+    // ── Edit transcript state ─────────────────────────────────────────────────
+    const [isEditing, setIsEditing] = useState(false)
+    const [editedTranscript, setEditedTranscript] = useState("")
+    const [savedEditedText, setSavedEditedText] = useState<string | null>(null)
+    const [savingEdit, setSavingEdit] = useState(false)
 
     // ── Polling ───────────────────────────────────────────────────────────────
     const fetchJob = async () => {
@@ -154,13 +187,51 @@ export default function JobDetail({ jobId, onBack }: JobDetailProps) {
         }
     }
 
-    const handleDownload = (format: "txt" | "docx" | "pdf") => {
+    const handleDownload = (format: "txt" | "docx" | "pdf", useEdited = false) => {
         try {
-            downloadJobFile(jobId, format)
-            toast.success(`Downloading ${format.toUpperCase()}…`)
+            downloadJobFile(jobId, format, useEdited)
+            toast.success(`Downloading ${useEdited ? 'edited ' : ''}${format.toUpperCase()}…`)
         } catch {
             toast.error("Download failed.")
         }
+    }
+
+    const handleDownloadText = (type: "original" | "edited") => {
+        const segs = parseTranscript(job?.transcript)
+        const text = type === "edited" ? savedEditedText! : segs ? flattenSegments(segs) : ""
+        downloadTranscriptAsText(jobId, type, text)
+        toast.success(`Downloading ${type} transcript…`)
+    }
+
+    // ── Edit transcript handlers ──────────────────────────────────────────────
+    const handleStartEdit = () => {
+        const segs = parseTranscript(job?.transcript)
+        const baseText = savedEditedText ?? (segs ? flattenSegments(segs) : "")
+        setEditedTranscript(baseText)
+        setIsEditing(true)
+    }
+
+    const handleSaveEdit = async () => {
+        if (!editedTranscript.trim()) return
+        setSavingEdit(true)
+        try {
+            await saveEditedTranscript(jobId, editedTranscript)
+            setSavedEditedText(editedTranscript)
+            setIsEditing(false)
+            toast.success("Edited transcript saved.")
+        } catch {
+            toast.error("Failed to save. Changes kept locally.")
+            // Keep edit open but store locally
+            setSavedEditedText(editedTranscript)
+            setIsEditing(false)
+        } finally {
+            setSavingEdit(false)
+        }
+    }
+
+    const handleCancelEdit = () => {
+        setIsEditing(false)
+        setEditedTranscript("")
     }
 
     // ── Keywords toggle ───────────────────────────────────────────────────────
@@ -174,7 +245,7 @@ export default function JobDetail({ jobId, onBack }: JobDetailProps) {
         keywordRefsMap.current.clear()
         try {
             const res = await getKeywords(flattenSegments(segs))
-            setKeywords(res.data.keywords ?? [])
+            setKeywords(normaliseKeywords(res.data.keywords))
         } catch {
             toast.error("Failed to extract keywords")
             setKeywordsEnabled(false)
@@ -190,7 +261,7 @@ export default function JobDetail({ jobId, onBack }: JobDetailProps) {
         setSummaryLoading(true)
         try {
             const res = await getSummary(flattenSegments(segs), job?.targetLanguage ?? undefined)
-            setSummaryData(res.data.summary ?? [])
+            setSummaryData(normaliseSummary(res.data.summary))
         } catch {
             toast.error("Failed to generate summary")
         } finally {
@@ -264,16 +335,48 @@ export default function JobDetail({ jobId, onBack }: JobDetailProps) {
                             Summary
                         </Button>
 
-                        {/* Download buttons */}
-                        <Button size="sm" variant="outline" className="gap-1.5" onClick={() => handleDownload("txt")}>
-                            <FileText className="w-3.5 h-3.5" /> TXT
-                        </Button>
-                        <Button size="sm" variant="outline" className="gap-1.5" onClick={() => handleDownload("docx")}>
-                            <BookOpen className="w-3.5 h-3.5" /> DOCX
-                        </Button>
-                        <Button size="sm" className="gap-1.5" onClick={() => handleDownload("pdf")}>
-                            <FileType className="w-3.5 h-3.5" /> PDF
-                        </Button>
+                        {/* Download dropdown */}
+                        <DropdownMenu>
+                            <DropdownMenuTrigger asChild>
+                                <Button size="sm" variant="outline" className="gap-1.5">
+                                    <Download className="w-3.5 h-3.5" />
+                                    Download
+                                    <ChevronDown className="w-3 h-3 ml-0.5" />
+                                </Button>
+                            </DropdownMenuTrigger>
+                            <DropdownMenuContent align="end">
+                                <DropdownMenuLabel>Original</DropdownMenuLabel>
+                                <DropdownMenuItem onClick={() => handleDownloadText("original")}>
+                                    <FileText className="w-3.5 h-3.5 mr-2" />
+                                    Original (.txt)
+                                </DropdownMenuItem>
+                                <DropdownMenuItem onClick={() => handleDownload("docx")}>
+                                    <BookOpen className="w-3.5 h-3.5 mr-2" />
+                                    Original (.docx)
+                                </DropdownMenuItem>
+                                <DropdownMenuItem onClick={() => handleDownload("pdf")}>
+                                    <FileType className="w-3.5 h-3.5 mr-2" />
+                                    Original (.pdf)
+                                </DropdownMenuItem>
+                                <DropdownMenuSeparator />
+                                <DropdownMenuLabel>Edited</DropdownMenuLabel>
+                                <DropdownMenuItem
+                                    onClick={() => handleDownloadText("edited")}
+                                    disabled={!savedEditedText}
+                                >
+                                    <Pencil className="w-3.5 h-3.5 mr-2" />
+                                    Edited (.txt)
+                                </DropdownMenuItem>
+                                <DropdownMenuItem disabled={!savedEditedText} onClick={() => handleDownload("docx", true)}>
+                                    <BookOpen className="w-3.5 h-3.5 mr-2" />
+                                    Edited (.docx)
+                                </DropdownMenuItem>
+                                <DropdownMenuItem disabled={!savedEditedText} onClick={() => handleDownload("pdf", true)}>
+                                    <FileType className="w-3.5 h-3.5 mr-2" />
+                                    Edited (.pdf)
+                                </DropdownMenuItem>
+                            </DropdownMenuContent>
+                        </DropdownMenu>
                     </div>
                 )}
             </div>
@@ -356,8 +459,8 @@ export default function JobDetail({ jobId, onBack }: JobDetailProps) {
 
                     {/* Transcript panel */}
                     <div className="relative flex flex-col h-[600px] border rounded-2xl bg-background shadow-sm overflow-hidden">
-                        {/* Speaker legend */}
-                        <div className="px-6 py-4 border-b bg-muted/20 flex items-center justify-between">
+                        {/* Speaker legend + Edit controls */}
+                        <div className="px-6 py-4 border-b bg-muted/20 flex items-center justify-between flex-wrap gap-2">
                             <div className="flex items-center gap-2 flex-wrap">
                                 <span className="text-sm font-medium text-muted-foreground mr-2">Speakers:</span>
                                 {[...new Set(segments.map((s) => s.speaker))].map((spk) => (
@@ -367,87 +470,142 @@ export default function JobDetail({ jobId, onBack }: JobDetailProps) {
                                     </div>
                                 ))}
                             </div>
-                            <div className="text-xs text-muted-foreground">{segments.length} segments</div>
-                        </div>
-
-                        {/* Chat-style Segments */}
-                        <div className="flex-1 overflow-y-auto p-6 space-y-6 bg-slate-50/30">
-                            {segments.map((seg, i) => {
-                                const isFirstInGroup = i === 0 || segments[i - 1].speaker !== seg.speaker
-                                const colorClass = speakerColor(seg.speaker)
-                                const [bg, text, border] = colorClass.split(" ")
-
-                                return (
-                                    <div key={i} className={`flex flex-col ${isFirstInGroup ? "mt-2" : "mt-1"}`}>
-                                        {isFirstInGroup && (
-                                            <div className="flex items-center gap-2 mb-1 px-1 flex-wrap">
-                                                <div className={`w-6 h-6 rounded-full flex items-center justify-center text-[10px] font-bold border ${bg} ${text} ${border}`}>
-                                                    {seg.speaker.slice(-1)}
-                                                </div>
-                                                <span className="text-xs font-bold text-foreground/80">{seg.speaker}</span>
-
-                                                {/* Confidence indicator */}
-                                                {seg.confidence !== undefined && (
-                                                    <div className="flex items-center gap-1">
-                                                        <span className="text-[10px] text-muted-foreground">
-                                                            {Math.round(seg.confidence * 100)}%
-                                                        </span>
-                                                        <div
-                                                            className="w-1.5 h-1.5 rounded-full transition-colors"
-                                                            style={{
-                                                                backgroundColor:
-                                                                    seg.confidence > 0.9 ? '#22c55e' :
-                                                                        seg.confidence > 0.7 ? '#eab308' :
-                                                                            '#ef4444'
-                                                            }}
-                                                            title={`Speaker confidence: ${Math.round(seg.confidence * 100)}%`}
-                                                        />
-                                                    </div>
-                                                )}
-
-                                                {/* Overlap warning */}
-                                                {seg.isOverlappingSpeech && (
-                                                    <Badge variant="outline" className="bg-amber-50 text-amber-700 text-[10px] px-1.5 py-0.5 h-5">
-                                                        ⚠️ Overlap
-                                                    </Badge>
-                                                )}
-
-                                                {job?.includeTimestamps && seg.start !== undefined && (
-                                                    <span className="text-[10px] text-muted-foreground font-medium bg-muted/50 px-1.5 py-0.5 rounded">
-                                                        {formatTime(seg.start)}
-                                                    </span>
-                                                )}
-                                            </div>
-                                        )}
-
-                                        <div className="group relative max-w-[85%] self-start ml-8">
-                                            <div className={`px-4 py-2.5 rounded-2xl border bg-white shadow-sm text-sm leading-relaxed text-foreground transition-all hover:shadow-md ${border}`}>
-                                                {keywordsEnabled && keywords.length > 0 ? (
-                                                    <KeywordHighlighter
-                                                        text={seg.text}
-                                                        keywords={keywords}
-                                                        onFirstOccurrenceRef={handleFirstOccurrenceRef}
-                                                    />
-                                                ) : (
-                                                    seg.text
-                                                )}
-                                            </div>
-
-                                            <button
-                                                onClick={() => {
-                                                    navigator.clipboard.writeText(seg.text)
-                                                    toast.success("Copied to clipboard")
-                                                }}
-                                                className="absolute -right-8 top-1/2 -translate-y-1/2 p-1.5 rounded-md text-muted-foreground opacity-0 group-hover:opacity-100 hover:bg-muted hover:text-foreground transition-all"
-                                                title="Copy text"
-                                            >
-                                                <FileText className="w-3.5 h-3.5" />
-                                            </button>
-                                        </div>
+                            <div className="flex items-center gap-2">
+                                <span className="text-xs text-muted-foreground">{segments.length} segments</span>
+                                {/* Edit / Save / Cancel buttons */}
+                                {!isEditing ? (
+                                    <Button
+                                        size="sm"
+                                        variant="ghost"
+                                        className="h-7 gap-1.5 text-xs"
+                                        onClick={handleStartEdit}
+                                    >
+                                        <Pencil className="w-3 h-3" />
+                                        Edit
+                                    </Button>
+                                ) : (
+                                    <div className="flex items-center gap-1.5">
+                                        <Button
+                                            size="sm"
+                                            variant="ghost"
+                                            className="h-7 gap-1 text-xs text-muted-foreground"
+                                            onClick={handleCancelEdit}
+                                            disabled={savingEdit}
+                                        >
+                                            <X className="w-3 h-3" />
+                                            Cancel
+                                        </Button>
+                                        <Button
+                                            size="sm"
+                                            className="h-7 gap-1 text-xs"
+                                            onClick={handleSaveEdit}
+                                            disabled={savingEdit}
+                                        >
+                                            {savingEdit
+                                                ? <Loader2 className="w-3 h-3 animate-spin" />
+                                                : <Check className="w-3 h-3" />
+                                            }
+                                            Save
+                                        </Button>
                                     </div>
-                                )
-                            })}
+                                )}
+                            </div>
                         </div>
+
+                        {/* Edit mode – textarea */}
+                        {isEditing ? (
+                            <div className="flex-1 flex flex-col p-4 gap-2">
+                                <p className="text-xs text-muted-foreground italic">
+                                    Editing transcript — each line as "Speaker: text"
+                                </p>
+                                <textarea
+                                    className="flex-1 w-full resize-none rounded-xl border bg-slate-50 px-4 py-3 text-sm leading-relaxed font-mono focus:outline-none focus:ring-2 focus:ring-primary/40"
+                                    value={editedTranscript}
+                                    onChange={(e) => setEditedTranscript(e.target.value)}
+                                    spellCheck
+                                    autoFocus
+                                />
+                            </div>
+                        ) : (
+                            /* Chat-style Segments */
+                            <div className="flex-1 overflow-y-auto p-6 space-y-6 bg-slate-50/30">
+                                {segments.map((seg, i) => {
+                                    const isFirstInGroup = i === 0 || segments[i - 1].speaker !== seg.speaker
+                                    const colorClass = speakerColor(seg.speaker)
+                                    const [bg, text, border] = colorClass.split(" ")
+
+                                    return (
+                                        <div key={i} className={`flex flex-col ${isFirstInGroup ? "mt-2" : "mt-1"}`}>
+                                            {isFirstInGroup && (
+                                                <div className="flex items-center gap-2 mb-1 px-1 flex-wrap">
+                                                    <div className={`w-6 h-6 rounded-full flex items-center justify-center text-[10px] font-bold border ${bg} ${text} ${border}`}>
+                                                        {seg.speaker.slice(-1)}
+                                                    </div>
+                                                    <span className="text-xs font-bold text-foreground/80">{seg.speaker}</span>
+
+                                                    {/* Confidence indicator */}
+                                                    {seg.confidence !== undefined && (
+                                                        <div className="flex items-center gap-1">
+                                                            <span className="text-[10px] text-muted-foreground">
+                                                                {Math.round(seg.confidence * 100)}%
+                                                            </span>
+                                                            <div
+                                                                className="w-1.5 h-1.5 rounded-full transition-colors"
+                                                                style={{
+                                                                    backgroundColor:
+                                                                        seg.confidence > 0.9 ? '#22c55e' :
+                                                                            seg.confidence > 0.7 ? '#eab308' :
+                                                                                '#ef4444'
+                                                                }}
+                                                                title={`Speaker confidence: ${Math.round(seg.confidence * 100)}%`}
+                                                            />
+                                                        </div>
+                                                    )}
+
+                                                    {/* Overlap warning */}
+                                                    {seg.isOverlappingSpeech && (
+                                                        <Badge variant="outline" className="bg-amber-50 text-amber-700 text-[10px] px-1.5 py-0.5 h-5">
+                                                            ⚠️ Overlap
+                                                        </Badge>
+                                                    )}
+
+                                                    {job?.includeTimestamps && seg.start !== undefined && (
+                                                        <span className="text-[10px] text-muted-foreground font-medium bg-muted/50 px-1.5 py-0.5 rounded">
+                                                            {formatTime(seg.start)}
+                                                        </span>
+                                                    )}
+                                                </div>
+                                            )}
+
+                                            <div className="group relative max-w-[85%] self-start ml-8">
+                                                <div className={`px-4 py-2.5 rounded-2xl border bg-white shadow-sm text-sm leading-relaxed text-foreground transition-all hover:shadow-md ${border}`}>
+                                                    {keywordsEnabled && keywords.length > 0 ? (
+                                                        <KeywordHighlighter
+                                                            text={seg.text}
+                                                            keywords={keywords}
+                                                            onFirstOccurrenceRef={handleFirstOccurrenceRef}
+                                                        />
+                                                    ) : (
+                                                        seg.text
+                                                    )}
+                                                </div>
+
+                                                <button
+                                                    onClick={() => {
+                                                        navigator.clipboard.writeText(seg.text)
+                                                        toast.success("Copied to clipboard")
+                                                    }}
+                                                    className="absolute -right-8 top-1/2 -translate-y-1/2 p-1.5 rounded-md text-muted-foreground opacity-0 group-hover:opacity-100 hover:bg-muted hover:text-foreground transition-all"
+                                                    title="Copy text"
+                                                >
+                                                    <FileText className="w-3.5 h-3.5" />
+                                                </button>
+                                            </div>
+                                        </div>
+                                    )
+                                })}
+                            </div>
+                        )}
 
                         {/* Summary overlay */}
                         {summaryData && (

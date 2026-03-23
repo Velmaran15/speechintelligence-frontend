@@ -2,6 +2,8 @@ import { useRef, useState } from "react"
 import type { DragEvent, ChangeEvent } from "react"
 import { X, Upload, Music, AlertCircle } from "lucide-react"
 import { Button } from "@/components/ui/button"
+import { Select, SelectTrigger, SelectValue, SelectContent, SelectItem } from "@/components/ui/select"
+import { Label } from "@/components/ui/label"
 import ProcessingOptions from "./ProcessingOptions"
 import { toast } from "sonner"
 
@@ -16,6 +18,7 @@ interface BatchUploadZoneProps {
             targetLanguage: string
             transliteration: boolean
             translation: boolean
+            provider: string
         }
     ) => Promise<void>
     loading: boolean
@@ -49,6 +52,7 @@ export default function BatchUploadZone({ onSubmit, loading }: BatchUploadZonePr
     const [targetLanguage, setTargetLanguage] = useState("none")
     const [transliteration, setTransliteration] = useState(false)
     const [translation, setTranslation] = useState(false)
+    const [provider, setProvider] = useState("sarvam")
 
     const addFiles = (incoming: FileList | File[]) => {
         const arr = Array.from(incoming)
@@ -139,7 +143,8 @@ export default function BatchUploadZone({ onSubmit, loading }: BatchUploadZonePr
             language: "auto",
             targetLanguage,
             transliteration,
-            translation
+            translation,
+            provider
         })
     }
 
@@ -188,7 +193,7 @@ export default function BatchUploadZone({ onSubmit, loading }: BatchUploadZonePr
                     <div className="space-y-3" onClick={(e) => e.stopPropagation()}>
 
                         {/* Header */}
-                        <div className="flex items-center justify-between mb-1">
+                        <div className="flex items-center justify-between mb-1 flex-wrap gap-2">
                             <span className="text-sm font-semibold text-foreground flex items-center gap-2">
                                 <Music className="w-4 h-4 text-primary" />
                                 {files.length} / {MAX_FILES} files selected
@@ -269,6 +274,22 @@ export default function BatchUploadZone({ onSubmit, loading }: BatchUploadZonePr
                         </p>
                     </div>
                 )}
+            </div>
+
+            {/* ── Provider ──────────────────────────────────────────────── */}
+            <div className="flex items-center gap-3">
+                <Label htmlFor="provider-select" className="text-sm font-medium text-muted-foreground whitespace-nowrap">
+                    Provider
+                </Label>
+                <Select value={provider} onValueChange={setProvider}>
+                    <SelectTrigger id="provider-select" className="w-40 h-8 text-xs">
+                        <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                        <SelectItem value="sarvam">Sarvam</SelectItem>
+                        <SelectItem value="elevenlabs">ElevenLabs</SelectItem>
+                    </SelectContent>
+                </Select>
             </div>
 
             {/* ── Processing Options ────────────────────────────────────── */}

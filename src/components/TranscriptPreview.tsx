@@ -1,7 +1,15 @@
 import { useCallback, useRef, useState } from "react"
 import { Button } from "@/components/ui/button"
 import { Badge } from "@/components/ui/badge"
-import { Download, Loader2, RotateCcw, Sparkles, Tag } from "lucide-react"
+import {
+    DropdownMenu,
+    DropdownMenuContent,
+    DropdownMenuItem,
+    DropdownMenuLabel,
+    DropdownMenuSeparator,
+    DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu"
+import { Download, Loader2, RotateCcw, Sparkles, Tag, Pencil, X, Check, ChevronDown, FileText, BookOpen, FileType } from "lucide-react"
 import { Switch } from "@/components/ui/switch"
 import { Label } from "@/components/ui/label"
 import { toast } from "sonner"
@@ -18,7 +26,7 @@ interface DiarizedSegment {
 
 interface TranscriptPreviewProps {
     transcript: string | DiarizedSegment[]
-    onDownload: () => void
+    onDownload: (format: "docx" | "pdf", useEdited?: boolean) => void
     onReset: () => void
     showTimestamps?: boolean
 }
@@ -57,6 +65,37 @@ function flattenTranscript(segments: DiarizedSegment[]): string {
     return segments.map((s) => `${s.speaker}: ${s.text}`).join("\n")
 }
 
+/** Normalise keywords – backend may return string[] or a single comma-joined string */
+function normaliseKeywords(raw: unknown): string[] {
+    if (Array.isArray(raw)) {
+        return raw.flatMap((item) =>
+            typeof item === "string" ? item.split(",").map((s) => s.trim()).filter(Boolean) : []
+        )
+    }
+    if (typeof raw === "string") return raw.split(",").map((s) => s.trim()).filter(Boolean)
+    return []
+}
+
+/** Normalise summary – backend may return string[] or a newline-joined string */
+function normaliseSummary(raw: unknown): string[] {
+    if (Array.isArray(raw)) return raw as string[]
+    if (typeof raw === "string") return raw.split("\n").map((s) => s.trim()).filter(Boolean)
+    return []
+}
+
+/** Download text as a .txt file (client-side blob) */
+function downloadAsText(text: string, label: string) {
+    const blob = new Blob([text], { type: "text/plain;charset=utf-8" })
+    const url = URL.createObjectURL(blob)
+    const a = document.createElement("a")
+    a.href = url
+    a.download = `Transcript_${label}.txt`
+    document.body.appendChild(a)
+    a.click()
+    a.remove()
+    URL.revokeObjectURL(url)
+}
+
 export default function TranscriptPreview({
     transcript,
     onDownload,
@@ -70,6 +109,11 @@ export default function TranscriptPreview({
 
     const [summaryLoading, setSummaryLoading] = useState(false)
     const [summaryData, setSummaryData] = useState<string[] | null>(null)
+
+    // ── Edit transcript state ─────────────────────────────────────────────────
+    const [isEditing, setIsEditing] = useState(false)
+    const [editedTranscript, setEditedTranscript] = useState("")
+    const [savedEditedText, setSavedEditedText] = useState<string | null>(null)
 
     // Map from keyword (lowercase) → first DOM element
     const keywordRefsMap = useRef<Map<string, HTMLSpanElement>>(new Map())
@@ -109,7 +153,7 @@ export default function TranscriptPreview({
         keywordRefsMap.current.clear()
         try {
             const res = await getKeywords(flattenTranscript(segments))
-            setKeywords(res.data.keywords ?? [])
+            setKeywords(normaliseKeywords(res.data.keywords))
         } catch {
             toast.error("Failed to extract keywords")
             setKeywordsEnabled(false)
@@ -124,12 +168,44 @@ export default function TranscriptPreview({
         setSummaryLoading(true)
         try {
             const res = await getSummary(flattenTranscript(segments))
-            setSummaryData(res.data.summary ?? [])
+            setSummaryData(normaliseSummary(res.data.summary))
         } catch {
             toast.error("Failed to generate summary")
         } finally {
             setSummaryLoading(false)
         }
+    }
+
+    // ── Edit handlers ────────────────────────────────────────────────────────
+    const handleStartEdit = () => {
+        const baseText = savedEditedText ?? (segments ? flattenTranscript(segments) : "")
+        setEditedTranscript(baseText)
+        setIsEditing(true)
+    }
+
+    const handleSaveEdit = () => {
+        if (!editedTranscript.trim()) return
+        setSavedEditedText(editedTranscript)
+        setIsEditing(false)
+        toast.success("Transcript saved locally.")
+    }
+
+    const handleCancelEdit = () => {
+        setIsEditing(false)
+        setEditedTranscript("")
+    }
+
+    // ── Download helpers ─────────────────────────────────────────────────────
+    const handleDownloadOriginal = () => {
+        const text = segments ? flattenTranscript(segments) : ""
+        downloadAsText(text, "original")
+        toast.success("Downloading original transcript…")
+    }
+
+    const handleDownloadEdited = () => {
+        if (!savedEditedText) return
+        downloadAsText(savedEditedText, "edited")
+        toast.success("Downloading edited transcript…")
     }
 
     // ── First-occurrence ref tracking ────────────────────────────────────────
@@ -193,18 +269,94 @@ export default function TranscriptPreview({
                         <RotateCcw className="w-4 h-4 mr-2" />
                         New
                     </Button>
-                    <Button onClick={onDownload} size="sm">
-                        <Download className="w-4 h-4 mr-2" />
-                        Download .docx
-                    </Button>
+
+                    {/* Download dropdown */}
+                    <DropdownMenu>
+                        <DropdownMenuTrigger asChild>
+                            <Button size="sm" className="gap-1.5">
+                                <Download className="w-3.5 h-3.5" />
+                                Download
+                                <ChevronDown className="w-3 h-3 ml-0.5" />
+                            </Button>
+                        </DropdownMenuTrigger>
+                            <DropdownMenuContent align="end">
+                                <DropdownMenuLabel>Original</DropdownMenuLabel>
+                                <DropdownMenuItem onClick={handleDownloadOriginal}>
+                                    <FileText className="w-3.5 h-3.5 mr-2" />
+                                    Original (.txt)
+                                </DropdownMenuItem>
+                                <DropdownMenuItem onClick={() => onDownload("docx")}>
+                                    <BookOpen className="w-3.5 h-3.5 mr-2" />
+                                    Original (.docx)
+                                </DropdownMenuItem>
+                                <DropdownMenuItem onClick={() => onDownload("pdf")}>
+                                    <FileType className="w-3.5 h-3.5 mr-2" />
+                                    Original (.pdf)
+                                </DropdownMenuItem>
+                                <DropdownMenuSeparator />
+                                <DropdownMenuLabel>Edited</DropdownMenuLabel>
+                                <DropdownMenuItem
+                                    onClick={handleDownloadEdited}
+                                    disabled={!savedEditedText}
+                                >
+                                    <Pencil className="w-3.5 h-3.5 mr-2" />
+                                    Edited (.txt)
+                                </DropdownMenuItem>
+                                <DropdownMenuItem disabled={!savedEditedText} onClick={() => onDownload("docx", true)}>
+                                    <BookOpen className="w-3.5 h-3.5 mr-2" />
+                                    Edited (.docx)
+                                </DropdownMenuItem>
+                                <DropdownMenuItem disabled={!savedEditedText} onClick={() => onDownload("pdf", true)}>
+                                    <FileType className="w-3.5 h-3.5 mr-2" />
+                                    Edited (.pdf)
+                                </DropdownMenuItem>
+                            </DropdownMenuContent>
+                    </DropdownMenu>
                 </div>
             </div>
 
-            {/* ── Transcript Panel (relative for summary overlay) ────────── */}
+            {/* ── Transcript Panel ────────── */}
             <div className="relative flex flex-col h-[500px] border rounded-2xl bg-background shadow-sm overflow-hidden">
+                {/* Panel toolbar with edit controls */}
+                {segments && (
+                    <div className="px-6 py-3 border-b bg-muted/20 flex items-center justify-between">
+                        <span className="text-xs text-muted-foreground">{segments.length} segments</span>
+                        {!isEditing ? (
+                            <Button size="sm" variant="ghost" className="h-7 gap-1.5 text-xs" onClick={handleStartEdit}>
+                                <Pencil className="w-3 h-3" />
+                                Edit
+                            </Button>
+                        ) : (
+                            <div className="flex items-center gap-1.5">
+                                <Button size="sm" variant="ghost" className="h-7 gap-1 text-xs text-muted-foreground" onClick={handleCancelEdit}>
+                                    <X className="w-3 h-3" />
+                                    Cancel
+                                </Button>
+                                <Button size="sm" className="h-7 gap-1 text-xs" onClick={handleSaveEdit}>
+                                    <Check className="w-3 h-3" />
+                                    Save
+                                </Button>
+                            </div>
+                        )}
+                    </div>
+                )}
+
                 {!segments ? (
                     <div className="flex-1 flex items-center justify-center text-muted-foreground italic">
                         No transcript data available
+                    </div>
+                ) : isEditing ? (
+                    <div className="flex-1 flex flex-col p-4 gap-2">
+                        <p className="text-xs text-muted-foreground italic">
+                            Editing transcript — each line as "Speaker: text"
+                        </p>
+                        <textarea
+                            className="flex-1 w-full resize-none rounded-xl border bg-slate-50 px-4 py-3 text-sm leading-relaxed font-mono focus:outline-none focus:ring-2 focus:ring-primary/40"
+                            value={editedTranscript}
+                            onChange={(e) => setEditedTranscript(e.target.value)}
+                            spellCheck
+                            autoFocus
+                        />
                     </div>
                 ) : (
                     <div className="flex-1 overflow-y-auto p-6 space-y-6 bg-slate-50/30">
