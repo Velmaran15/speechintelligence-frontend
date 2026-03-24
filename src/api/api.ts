@@ -47,12 +47,18 @@ export const retryJob = (jobId: string) =>
 
 // ─── Documents ───────────────────────────────────────────────────────────────
 /** Trigger a browser download for the given format (txt | docx | pdf) */
-export const downloadJobFile = (jobId: string, format: "txt" | "docx" | "pdf", useEdited = false) => {
-  const typeQuery = useEdited ? "?type=edited" : "";
-  const url = `http://localhost:8080/v1/documents/${jobId}/download/${format}${typeQuery}`;
+export const downloadJobFile = (
+  jobId: string,
+  format: "txt" | "docx" | "pdf",
+  type: "transcript" | "summary" | "combined" = "transcript",
+  version: "original" | "edited" = "original"
+) => {
+  const url = `http://localhost:8080/v1/documents/${jobId}/download?format=${format}&type=${type}&version=${version}`;
   const a = document.createElement("a");
   a.href = url;
-  a.download = `Transcript_${jobId}${useEdited ? '_Edited' : ''}.${format}`;
+  // Let the browser handle the filename from Content-Disposition header if possible, 
+  // but setting it here as a fallback
+  a.download = `${type}_${jobId}.${format}`;
   document.body.appendChild(a);
   a.click();
   a.remove();
@@ -82,9 +88,9 @@ export const downloadTranscriptAsText = (
 
 // ─── AI ──────────────────────────────────────────────────────────────────────
 /** POST /ai/keywords – extract keywords from transcript text */
-export const getKeywords = (transcript: string) =>
-  API.post<KeywordResponse>("/ai/keywords", { transcript });
+export const getKeywords = (transcript: string, jobId?: string) =>
+  API.post<KeywordResponse>("/ai/keywords", { transcript, jobId });
 
 /** POST /ai/summary – generate 5-bullet summary from transcript text */
-export const getSummary = (transcript: string, targetLanguage?: string) =>
-  API.post<SummaryResponse>("/ai/summary", { transcript, targetLanguage });
+export const getSummary = (transcript: string, targetLanguage?: string, jobId?: string) =>
+  API.post<SummaryResponse>("/ai/summary", { transcript, targetLanguage, jobId });

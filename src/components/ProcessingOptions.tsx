@@ -14,6 +14,8 @@ interface ProcessingOptionsProps {
     setTransliteration: (val: boolean) => void
     translation: boolean
     setTranslation: (val: boolean) => void
+    segmentation: boolean
+    setSegmentation: (val: boolean) => void
 }
 
 export default function ProcessingOptions({
@@ -29,7 +31,19 @@ export default function ProcessingOptions({
     setTransliteration,
     translation,
     setTranslation,
+    segmentation,
+    setSegmentation,
 }: ProcessingOptionsProps) {
+    const handleDiarizationChange = (val: boolean) => {
+        setDiarization(val)
+        if (val) setSegmentation(false)
+    }
+
+    const handleSegmentationChange = (val: boolean) => {
+        setSegmentation(val)
+        if (val) setDiarization(false)
+    }
+
     return (
         <div className="space-y-6">
 
@@ -71,11 +85,11 @@ export default function ProcessingOptions({
                 <div className="space-y-4 border rounded-lg p-4 bg-muted/20 text-foreground">
                     <label className="text-base font-semibold">Processing Options</label>
 
-                    <div className="flex items-center space-x-2">
+                    <div className={`flex items-center space-x-2 transition-all duration-200 ${segmentation ? "opacity-30 grayscale-[50%]" : ""}`}>
                         <Checkbox
                             id="diarization"
                             checked={diarization}
-                            onCheckedChange={(c) => setDiarization(!!c)}
+                            onCheckedChange={(c) => handleDiarizationChange(!!c)}
                         />
                         <div className="grid gap-1.5 leading-none w-full">
                             <label
@@ -86,6 +100,25 @@ export default function ProcessingOptions({
                             </label>
                             <p className="text-xs text-muted-foreground mt-0.5">
                                 Identify who is speaking (Speaker 1, Speaker 2...)
+                            </p>
+                        </div>
+                    </div>
+
+                    <div className={`flex items-center space-x-2 transition-all duration-200 ${diarization ? "opacity-30 grayscale-[50%]" : ""}`}>
+                        <Checkbox
+                            id="segmentation"
+                            checked={segmentation}
+                            onCheckedChange={(c) => handleSegmentationChange(!!c)}
+                        />
+                        <div className="grid gap-1.5 leading-none w-full">
+                            <label
+                                htmlFor="segmentation"
+                                className="text-sm font-medium leading-none peer-disabled:cursor-not-allowed peer-disabled:opacity-70"
+                            >
+                                Silence Detection (Segmentation)
+                            </label>
+                            <p className="text-xs text-muted-foreground mt-0.5">
+                                Split transcript by silence duration
                             </p>
                         </div>
                     </div>
@@ -138,7 +171,7 @@ export default function ProcessingOptions({
                                 htmlFor="transliteration"
                                 className="text-sm font-medium leading-none peer-disabled:cursor-not-allowed peer-disabled:opacity-70"
                             >
-                                Transliteration
+                                Transliteration(Tanglish)
                             </label>
                             <p className="text-xs text-muted-foreground">
                                 Convert script to another phonetic representation.

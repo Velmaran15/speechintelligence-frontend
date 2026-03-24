@@ -126,7 +126,7 @@ export default function TranscriptPreview({
             const parsed = JSON.parse(transcript)
             if (Array.isArray(parsed)) return parsed
         } catch {
-            const speakerRegex = /(Speaker \d+|Person [A-Z]):/g
+            const speakerRegex = /(Speaker \d+|Person [A-Z]|Segment \d+|Silence Segment \d+|\[\d{2}:\d{2}(?::\d{2})?\]):/gi
             if (speakerRegex.test(transcript)) {
                 const segs: DiarizedSegment[] = []
                 const parts = transcript.split(speakerRegex)
@@ -279,38 +279,38 @@ export default function TranscriptPreview({
                                 <ChevronDown className="w-3 h-3 ml-0.5" />
                             </Button>
                         </DropdownMenuTrigger>
-                            <DropdownMenuContent align="end">
-                                <DropdownMenuLabel>Original</DropdownMenuLabel>
-                                <DropdownMenuItem onClick={handleDownloadOriginal}>
-                                    <FileText className="w-3.5 h-3.5 mr-2" />
-                                    Original (.txt)
-                                </DropdownMenuItem>
-                                <DropdownMenuItem onClick={() => onDownload("docx")}>
-                                    <BookOpen className="w-3.5 h-3.5 mr-2" />
-                                    Original (.docx)
-                                </DropdownMenuItem>
-                                <DropdownMenuItem onClick={() => onDownload("pdf")}>
-                                    <FileType className="w-3.5 h-3.5 mr-2" />
-                                    Original (.pdf)
-                                </DropdownMenuItem>
-                                <DropdownMenuSeparator />
-                                <DropdownMenuLabel>Edited</DropdownMenuLabel>
-                                <DropdownMenuItem
-                                    onClick={handleDownloadEdited}
-                                    disabled={!savedEditedText}
-                                >
-                                    <Pencil className="w-3.5 h-3.5 mr-2" />
-                                    Edited (.txt)
-                                </DropdownMenuItem>
-                                <DropdownMenuItem disabled={!savedEditedText} onClick={() => onDownload("docx", true)}>
-                                    <BookOpen className="w-3.5 h-3.5 mr-2" />
-                                    Edited (.docx)
-                                </DropdownMenuItem>
-                                <DropdownMenuItem disabled={!savedEditedText} onClick={() => onDownload("pdf", true)}>
-                                    <FileType className="w-3.5 h-3.5 mr-2" />
-                                    Edited (.pdf)
-                                </DropdownMenuItem>
-                            </DropdownMenuContent>
+                        <DropdownMenuContent align="end">
+                            <DropdownMenuLabel>Original</DropdownMenuLabel>
+                            <DropdownMenuItem onClick={handleDownloadOriginal}>
+                                <FileText className="w-3.5 h-3.5 mr-2" />
+                                Original (.txt)
+                            </DropdownMenuItem>
+                            <DropdownMenuItem onClick={() => onDownload("docx")}>
+                                <BookOpen className="w-3.5 h-3.5 mr-2" />
+                                Original (.docx)
+                            </DropdownMenuItem>
+                            <DropdownMenuItem onClick={() => onDownload("pdf")}>
+                                <FileType className="w-3.5 h-3.5 mr-2" />
+                                Original (.pdf)
+                            </DropdownMenuItem>
+                            <DropdownMenuSeparator />
+                            <DropdownMenuLabel>Edited</DropdownMenuLabel>
+                            <DropdownMenuItem
+                                onClick={handleDownloadEdited}
+                                disabled={!savedEditedText}
+                            >
+                                <Pencil className="w-3.5 h-3.5 mr-2" />
+                                Edited (.txt)
+                            </DropdownMenuItem>
+                            <DropdownMenuItem disabled={!savedEditedText} onClick={() => onDownload("docx", true)}>
+                                <BookOpen className="w-3.5 h-3.5 mr-2" />
+                                Edited (.docx)
+                            </DropdownMenuItem>
+                            <DropdownMenuItem disabled={!savedEditedText} onClick={() => onDownload("pdf", true)}>
+                                <FileType className="w-3.5 h-3.5 mr-2" />
+                                Edited (.pdf)
+                            </DropdownMenuItem>
+                        </DropdownMenuContent>
                     </DropdownMenu>
                 </div>
             </div>

@@ -19,6 +19,7 @@ interface BatchUploadZoneProps {
             transliteration: boolean
             translation: boolean
             provider: string
+            segmentation: boolean
         }
     ) => Promise<void>
     loading: boolean
@@ -53,6 +54,7 @@ export default function BatchUploadZone({ onSubmit, loading }: BatchUploadZonePr
     const [transliteration, setTransliteration] = useState(false)
     const [translation, setTranslation] = useState(false)
     const [provider, setProvider] = useState("sarvam")
+    const [segmentation, setSegmentation] = useState(false)
 
     const addFiles = (incoming: FileList | File[]) => {
         const arr = Array.from(incoming)
@@ -144,7 +146,8 @@ export default function BatchUploadZone({ onSubmit, loading }: BatchUploadZonePr
             targetLanguage,
             transliteration,
             translation,
-            provider
+            provider,
+            segmentation
         })
     }
 
@@ -306,6 +309,8 @@ export default function BatchUploadZone({ onSubmit, loading }: BatchUploadZonePr
                 setTransliteration={setTransliteration}
                 translation={translation}
                 setTranslation={setTranslation}
+                segmentation={segmentation}
+                setSegmentation={setSegmentation}
             />
 
             {/* ── Submit ───────────────────────────────────────────────── */}

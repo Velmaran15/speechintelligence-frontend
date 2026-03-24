@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react"
-import { getJobStatus, retryJob, downloadJobFile, getKeywords, getSummary, saveEditedTranscript, downloadTranscriptAsText } from "@/api/api"
+import { getJobStatus, retryJob, downloadJobFile, getKeywords, getSummary, saveEditedTranscript } from "@/api/api"
 import { Button } from "@/components/ui/button"
 import { Badge } from "@/components/ui/badge"
 import { Switch } from "@/components/ui/switch"
@@ -31,6 +31,9 @@ interface JobData {
     id: string
     status: "pending" | "processing" | "completed" | "failed"
     transcript?: string | DiarizedSegment[]
+    originalTranscript?: string
+    editedTranscript?: string
+    summary?: string[] | string
     originalName?: string
     filename?: string
     error?: string
@@ -59,7 +62,7 @@ function parseTranscript(raw: string | DiarizedSegment[] | undefined): DiarizedS
             const parsed = JSON.parse(raw)
             if (Array.isArray(parsed)) return parsed as DiarizedSegment[]
         } catch {
-            const speakerRegex = /(Speaker \d+|Person [A-Z]):/g
+            const speakerRegex = /(Speaker \d+|Person [A-Z]|Segment \d+|Silence Segment \d+|\[\d{2}:\d{2}(?::\d{2})?\]):/gi
             if (speakerRegex.test(raw)) {
                 const segments: DiarizedSegment[] = []
                 const parts = raw.split(speakerRegex)
@@ -156,6 +159,12 @@ export default function JobDetail({ jobId, onBack }: JobDetailProps) {
             const res = await getJobStatus(jobId)
             const data: JobData = res.data
             setJob(data)
+            if (data.editedTranscript) {
+                setSavedEditedText(data.editedTranscript)
+            }
+            if (data.summary) {
+                setSummaryData(normaliseSummary(data.summary))
+            }
             if (data.status === "completed" || data.status === "failed") {
                 if (intervalRef.current) { clearInterval(intervalRef.current); intervalRef.current = null }
                 if (data.status === "completed") toast.success("Transcript ready! 🎉")
@@ -187,20 +196,14 @@ export default function JobDetail({ jobId, onBack }: JobDetailProps) {
         }
     }
 
-    const handleDownload = (format: "txt" | "docx" | "pdf", useEdited = false) => {
+    const handleDownload = (format: "txt" | "docx" | "pdf", type: "transcript" | "summary" | "combined" = "transcript") => {
         try {
-            downloadJobFile(jobId, format, useEdited)
-            toast.success(`Downloading ${useEdited ? 'edited ' : ''}${format.toUpperCase()}…`)
+            const version = (type === "transcript" || type === "combined") && (savedEditedText || job?.editedTranscript) ? "edited" : "original"
+            downloadJobFile(jobId, format, type, version)
+            toast.success(`Downloading ${type === "transcript" ? (version === "edited" ? "edited " : "original ") : ""}${type} ${format.toUpperCase()}…`)
         } catch {
             toast.error("Download failed.")
         }
-    }
-
-    const handleDownloadText = (type: "original" | "edited") => {
-        const segs = parseTranscript(job?.transcript)
-        const text = type === "edited" ? savedEditedText! : segs ? flattenSegments(segs) : ""
-        downloadTranscriptAsText(jobId, type, text)
-        toast.success(`Downloading ${type} transcript…`)
     }
 
     // ── Edit transcript handlers ──────────────────────────────────────────────
@@ -244,7 +247,7 @@ export default function JobDetail({ jobId, onBack }: JobDetailProps) {
         setKeywordsLoading(true)
         keywordRefsMap.current.clear()
         try {
-            const res = await getKeywords(flattenSegments(segs))
+            const res = await getKeywords(flattenSegments(segs), jobId)
             setKeywords(normaliseKeywords(res.data.keywords))
         } catch {
             toast.error("Failed to extract keywords")
@@ -256,12 +259,18 @@ export default function JobDetail({ jobId, onBack }: JobDetailProps) {
 
     // ── Summary ───────────────────────────────────────────────────────────────
     const handleGenerateSummary = async () => {
-        const segs = parseTranscript(job?.transcript)
-        if (!segs) return
+        // Use edited text if available, otherwise original segments
+        const transcriptText = savedEditedText || (segments && segments.length > 0 ? segments.map(s => `${s.speaker}: ${s.text}`).join("\n") : "")
+        if (!transcriptText?.trim()) return
+
         setSummaryLoading(true)
         try {
-            const res = await getSummary(flattenSegments(segs), job?.targetLanguage ?? undefined)
-            setSummaryData(normaliseSummary(res.data.summary))
+            const res = await getSummary(transcriptText, job?.targetLanguage ?? undefined, jobId)
+            const summ = normaliseSummary(res.data.summary)
+            setSummaryData(summ)
+            // Also update the job state locally so the download buttons stay enabled 
+            // even if the summary overlay is closed before the next poll.
+            setJob((prev) => prev ? { ...prev, summary: summ } : prev)
         } catch {
             toast.error("Failed to generate summary")
         } finally {
@@ -288,6 +297,14 @@ export default function JobDetail({ jobId, onBack }: JobDetailProps) {
 
     const segments = parseTranscript(job?.transcript)
     const fileName = job?.originalName ?? job?.filename ?? `Job ${jobId.slice(0, 8)}`
+
+    // Robust check for summary availability
+    const isSummaryAvailable = !!(
+        summaryData?.length ||
+        (Array.isArray(job?.summary) && (job?.summary as any[]).length > 0) ||
+        (job?.summary && typeof job.summary === "object" && Array.isArray((job.summary as any).summary) && (job.summary as any).summary.length > 0) ||
+        (typeof job?.summary === "string" && job.summary.trim().length > 0)
+    );
 
     return (
         <div className="space-y-6 animate-in fade-in slide-in-from-bottom-4 duration-500">
@@ -344,36 +361,97 @@ export default function JobDetail({ jobId, onBack }: JobDetailProps) {
                                     <ChevronDown className="w-3 h-3 ml-0.5" />
                                 </Button>
                             </DropdownMenuTrigger>
-                            <DropdownMenuContent align="end">
-                                <DropdownMenuLabel>Original</DropdownMenuLabel>
-                                <DropdownMenuItem onClick={() => handleDownloadText("original")}>
-                                    <FileText className="w-3.5 h-3.5 mr-2" />
-                                    Original (.txt)
-                                </DropdownMenuItem>
-                                <DropdownMenuItem onClick={() => handleDownload("docx")}>
-                                    <BookOpen className="w-3.5 h-3.5 mr-2" />
-                                    Original (.docx)
-                                </DropdownMenuItem>
-                                <DropdownMenuItem onClick={() => handleDownload("pdf")}>
-                                    <FileType className="w-3.5 h-3.5 mr-2" />
-                                    Original (.pdf)
-                                </DropdownMenuItem>
+                            <DropdownMenuContent align="end" className="w-56">
+                                {/* SECTION 1: Transcript */}
+                                <DropdownMenuLabel>Transcript</DropdownMenuLabel>
+                                {savedEditedText || job?.editedTranscript ? (
+                                    <>
+                                        <DropdownMenuItem onClick={() => handleDownload("txt", "transcript")}>
+                                            <Pencil className="w-3.5 h-3.5 mr-2" />
+                                            Edited (.txt)
+                                        </DropdownMenuItem>
+                                        <DropdownMenuItem onClick={() => handleDownload("docx", "transcript")}>
+                                            <BookOpen className="w-3.5 h-3.5 mr-2" />
+                                            Edited (.docx)
+                                        </DropdownMenuItem>
+                                        <DropdownMenuItem onClick={() => handleDownload("pdf", "transcript")}>
+                                            <FileType className="w-3.5 h-3.5 mr-2" />
+                                            Edited (.pdf)
+                                        </DropdownMenuItem>
+                                    </>
+                                ) : (
+                                    <>
+                                        <DropdownMenuItem onClick={() => handleDownload("txt", "transcript")}>
+                                            <FileText className="w-3.5 h-3.5 mr-2" />
+                                            Original (.txt)
+                                        </DropdownMenuItem>
+                                        <DropdownMenuItem onClick={() => handleDownload("docx", "transcript")}>
+                                            <BookOpen className="w-3.5 h-3.5 mr-2" />
+                                            Original (.docx)
+                                        </DropdownMenuItem>
+                                        <DropdownMenuItem onClick={() => handleDownload("pdf", "transcript")}>
+                                            <FileType className="w-3.5 h-3.5 mr-2" />
+                                            Original (.pdf)
+                                        </DropdownMenuItem>
+                                    </>
+                                )}
+
                                 <DropdownMenuSeparator />
-                                <DropdownMenuLabel>Edited</DropdownMenuLabel>
+
+                                {/* SECTION 2: Summary */}
+                                <DropdownMenuLabel className="flex items-center justify-between">
+                                    Summary
+                                    {!isSummaryAvailable && <Badge variant="secondary" className="text-[10px] h-4">N/A</Badge>}
+                                </DropdownMenuLabel>
                                 <DropdownMenuItem
-                                    onClick={() => handleDownloadText("edited")}
-                                    disabled={!savedEditedText}
+                                    disabled={!isSummaryAvailable}
+                                    onClick={() => handleDownload("txt", "summary")}
                                 >
-                                    <Pencil className="w-3.5 h-3.5 mr-2" />
-                                    Edited (.txt)
+                                    <Sparkles className="w-3.5 h-3.5 mr-2" />
+                                    Summary (.txt)
                                 </DropdownMenuItem>
-                                <DropdownMenuItem disabled={!savedEditedText} onClick={() => handleDownload("docx", true)}>
+                                <DropdownMenuItem
+                                    disabled={!isSummaryAvailable}
+                                    onClick={() => handleDownload("docx", "summary")}
+                                >
                                     <BookOpen className="w-3.5 h-3.5 mr-2" />
-                                    Edited (.docx)
+                                    Summary (.docx)
                                 </DropdownMenuItem>
-                                <DropdownMenuItem disabled={!savedEditedText} onClick={() => handleDownload("pdf", true)}>
+                                <DropdownMenuItem
+                                    disabled={!isSummaryAvailable}
+                                    onClick={() => handleDownload("pdf", "summary")}
+                                >
                                     <FileType className="w-3.5 h-3.5 mr-2" />
-                                    Edited (.pdf)
+                                    Summary (.pdf)
+                                </DropdownMenuItem>
+
+                                <DropdownMenuSeparator />
+
+                                {/* SECTION 3: Transcript + Summary */}
+                                <DropdownMenuLabel className="flex items-center justify-between">
+                                    Transcript + Summary
+                                    {!isSummaryAvailable && <Badge variant="secondary" className="text-[10px] h-4">N/A</Badge>}
+                                </DropdownMenuLabel>
+                                <DropdownMenuItem
+                                    disabled={!isSummaryAvailable}
+                                    onClick={() => handleDownload("txt", "combined")}
+                                >
+                                    <Download className="w-3.5 h-3.5 mr-2" />
+                                    Combined (.txt)
+                                </DropdownMenuItem>
+                                <DropdownMenuItem
+                                    disabled={!isSummaryAvailable}
+                                    onClick={() => handleDownload("docx", "combined")}
+                                >
+                                    <BookOpen className="w-3.5 h-3.5 mr-2" />
+                                    Combined (.docx)
+                                </DropdownMenuItem>
+                                <DropdownMenuItem
+                                    disabled={!isSummaryAvailable}
+                                    onClick={() => handleDownload("pdf", "combined")}
+                                >
+                                    <FileType className="w-3.5 h-3.5 mr-2" />
+                                    Combined (.pdf)
                                 </DropdownMenuItem>
                             </DropdownMenuContent>
                         </DropdownMenu>

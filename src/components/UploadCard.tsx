@@ -26,6 +26,7 @@ export default function UploadCard() {
       transliteration: boolean
       translation: boolean
       provider: string
+      segmentation: boolean
     }
   ) => {
     try {
@@ -41,8 +42,10 @@ export default function UploadCard() {
       formData.append("transliteration", String(options.transliteration))
       formData.append("translation", String(options.translation))
       formData.append("provider", options.provider)
-      // formData.append("segmentDetection", String(true))
-      // formData.append("silenceDurationS", String(1))
+      if (options.segmentation) {
+        formData.append("segmentDetection", "true")
+        formData.append("silenceDurationS", String(0.5))
+      }
 
       const res = await submitBatch(formData)
 
