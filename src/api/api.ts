@@ -1,7 +1,7 @@
 import axios from "axios";
 
 const API = axios.create({
-  baseURL: "http://localhost:8080/v1/",
+  baseURL: "https://my-backend-55143466234.asia-south1.run.app/",
 });
 
 // ─── Types ────────────────────────────────────────────────────────────────
@@ -53,7 +53,7 @@ export const downloadJobFile = (
   type: "transcript" | "summary" | "combined" = "transcript",
   version: "original" | "edited" = "original"
 ) => {
-  const url = `http://localhost:8080/v1/documents/${jobId}/download?format=${format}&type=${type}&version=${version}`;
+  const url = `https://my-backend-55143466234.asia-south1.run.app/documents/${jobId}/download?format=${format}&type=${type}&version=${version}`;
   const a = document.createElement("a");
   a.href = url;
   // Let the browser handle the filename from Content-Disposition header if possible, 
