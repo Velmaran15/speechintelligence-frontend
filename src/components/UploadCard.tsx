@@ -41,6 +41,8 @@ export default function UploadCard() {
       formData.append("transliteration", String(options.transliteration))
       formData.append("translation", String(options.translation))
       formData.append("provider", options.provider)
+      // formData.append("segmentDetection", String(true))
+      // formData.append("silenceDurationS", String(1))
 
       const res = await submitBatch(formData)
 

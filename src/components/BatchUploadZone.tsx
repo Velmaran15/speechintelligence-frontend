@@ -30,7 +30,7 @@ interface RejectedFile {
 }
 
 const MAX_FILES = 20
-const MAX_MB = 100
+const MAX_MB = 120
 // Extension-only check — MIME is unreliable (e.g. .opus reports as audio/ogg)
 const ACCEPTED_EXTS = /\.(mp3|wav|m4a|ogg|flac)$/i
 
